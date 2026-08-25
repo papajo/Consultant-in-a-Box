@@ -1,0 +1,7 @@
+{
+  "name": "Consultant-in-a-Box",
+  "description": "Agentic AI opportunity evaluator and RFP triage system with multi-step requirement extraction, profile matching, web research, risk scoring, and evidence-backed GO/REVIEW/PASS recommendations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
