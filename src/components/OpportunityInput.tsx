@@ -17,9 +17,11 @@ import {
   RefreshCw,
   FolderUp,
   HelpCircle,
+  Cpu,
 } from 'lucide-react';
 import { SAMPLE_RFPS, SampleRFP } from '../data/sampleRFPs.ts';
 import { ConsultantProfile } from '../types/agent.ts';
+import { parseRFPDocumentInBrowser, ClientParsedDocument } from '../utils/browserDocumentParser.ts';
 
 interface UploadedFileInfo {
   name: string;
@@ -29,6 +31,7 @@ interface UploadedFileInfo {
   charCount: number;
   pageCount?: number;
   uploadedAt: string;
+  engine: string;
 }
 
 interface OpportunityInputProps {
@@ -50,6 +53,7 @@ export const OpportunityInput: React.FC<OpportunityInputProps> = ({
   const [selectedSampleId, setSelectedSampleId] = useState<string>('');
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [isParsing, setIsParsing] = useState<boolean>(false);
+  const [parsingEngineStatus, setParsingEngineStatus] = useState<string>('');
   const [parseError, setParseError] = useState<string | null>(null);
   const [uploadedFile, setUploadedFile] = useState<UploadedFileInfo | null>(null);
   const [showExtractedPreview, setShowExtractedPreview] = useState<boolean>(true);
@@ -76,78 +80,48 @@ export const OpportunityInput: React.FC<OpportunityInputProps> = ({
     setSelectedSampleId('');
 
     const fileName = file.name;
-    const fileType = file.type || '';
     const extension = fileName.split('.').pop()?.toLowerCase() || '';
 
+    if (extension === 'pdf') {
+      setParsingEngineStatus('Extracting pages with PDF.js...');
+    } else if (extension === 'docx' || extension === 'doc') {
+      setParsingEngineStatus('Extracting document text with Mammoth.js...');
+    } else {
+      setParsingEngineStatus('Reading text stream...');
+    }
+
     try {
-      // 1. Direct browser read for small plain-text files
-      if (['txt', 'md', 'markdown', 'json'].includes(extension) && file.size < 500000) {
-        const text = await file.text();
-        if (!text.trim()) {
-          throw new Error('The uploaded file is empty.');
-        }
-        onChangeText(text);
-        const words = text.trim().split(/\s+/).filter(Boolean);
-        setUploadedFile({
-          name: fileName,
-          size: file.size,
-          type: extension.toUpperCase(),
-          wordCount: words.length,
-          charCount: text.length,
-          uploadedAt: new Date().toLocaleTimeString(),
-        });
-        setIsParsing(false);
-        return;
+      // Direct browser-based text extraction using pdfjs-dist and mammoth.js
+      const result: ClientParsedDocument = await parseRFPDocumentInBrowser(file);
+
+      if (!result.text || !result.text.trim()) {
+        throw new Error(`Unable to extract readable text from "${fileName}". Please check if the file is empty or encrypted.`);
       }
 
-      // 2. Multi-format server parser for PDF, DOCX, Images (OCR), RTF, HTML, CSV
-      const base64Data = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          // Extract base64 portion from data URL
-          const base64 = result.includes(',') ? result.split(',')[1] : result;
-          resolve(base64);
-        };
-        reader.onerror = (err) => reject(err);
-        reader.readAsDataURL(file);
-      });
+      // Update the application text state
+      onChangeText(result.text);
 
-      const response = await fetch('/api/parse-document', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileBase64: base64Data,
-          fileName: fileName,
-          mimeType: fileType,
-        }),
-      });
+      let engineLabel = 'Client PDF.js';
+      if (result.method === 'browser-mammoth') engineLabel = 'Client Mammoth.js';
+      else if (result.method === 'browser-text') engineLabel = 'Browser Text Reader';
+      else if (result.method === 'server-fallback') engineLabel = 'Multimodal OCR';
 
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || `Server extraction failed (${response.status})`);
-      }
-
-      const parsedData = await response.json();
-      if (!parsedData.text || !parsedData.text.trim()) {
-        throw new Error('No readable text could be extracted from this document.');
-      }
-
-      onChangeText(parsedData.text);
       setUploadedFile({
         name: fileName,
         size: file.size,
-        type: (extension || fileType.split('/')[1] || 'DOC').toUpperCase(),
-        wordCount: parsedData.wordCount,
-        charCount: parsedData.charCount,
-        pageCount: parsedData.pageCount,
-        uploadedAt: new Date().toLocaleTimeString(),
+        type: extension.toUpperCase() || 'DOC',
+        wordCount: result.wordCount,
+        charCount: result.charCount,
+        pageCount: result.pageCount,
+        uploadedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        engine: engineLabel,
       });
     } catch (err: any) {
-      console.error('[FileUpload] Error parsing document:', err);
-      setParseError(err.message || 'Failed to parse the uploaded document.');
+      console.error('[BrowserDocumentParser] Error parsing document:', err);
+      setParseError(err.message || 'Failed to parse the uploaded document in browser.');
     } finally {
       setIsParsing(false);
+      setParsingEngineStatus('');
     }
   };
 
@@ -338,7 +312,10 @@ export const OpportunityInput: React.FC<OpportunityInputProps> = ({
                         </>
                       )}
                       <span>•</span>
-                      <span>Uploaded: {uploadedFile.uploadedAt}</span>
+                      <span className="inline-flex items-center gap-1 font-mono text-[11px] text-amber-800 bg-amber-100/70 px-1.5 py-0.5 rounded">
+                        <Cpu className="w-3 h-3" />
+                        {uploadedFile.engine}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -410,10 +387,10 @@ export const OpportunityInput: React.FC<OpportunityInputProps> = ({
                 <div className="py-8 space-y-3">
                   <div className="w-10 h-10 border-3 border-amber-600 border-t-transparent rounded-full animate-spin mx-auto" />
                   <div className="font-bold text-stone-900 text-sm">
-                    Extracting RFP Content & Formatting...
+                    {parsingEngineStatus || 'Extracting RFP Content & Formatting...'}
                   </div>
                   <p className="text-xs text-stone-500 max-w-sm mx-auto">
-                    Parsing document tables, requirements, deliverables, and scope of work.
+                    Parsing document tables, requirements, deliverables, and scope of work using browser text engine.
                   </p>
                 </div>
               ) : (
