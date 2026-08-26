@@ -173,3 +173,55 @@ export interface EvaluationState {
   activities: AgentActivity[];
   errorMessage?: string;
 }
+
+export type PipelineStage =
+  | 'evaluating'
+  | 'pursuing'
+  | 'discovery_scheduled'
+  | 'proposal_submitted'
+  | 'won'
+  | 'passed'
+  | 'archived';
+
+export interface PipelineOpportunity {
+  id: string;
+  report: OpportunityEvaluationReport;
+  stage: PipelineStage;
+  notes: string;
+  tags: string[];
+  targetRateUsd?: number;
+  estimatedHours?: number;
+  estimatedValueUsd?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GeneratedProposal {
+  executivePitch: string;
+  statementOfQualifications: string;
+  requirementResponses: Array<{
+    requirement: string;
+    capabilityEvidence: string;
+    pastProjectCitation: string;
+  }>;
+  riskMitigationPlan: string;
+  proposedCommercialTerms: string;
+  clientClarificationEmail: string;
+}
+
+export interface OpportunityChatMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  suggestedActions?: string[];
+}
+
+export interface ScoringWeightsConfig {
+  skillsWeight: number; // default 35
+  experienceWeight: number; // default 25
+  commercialWeight: number; // default 20
+  riskTolerance: 'conservative' | 'balanced' | 'aggressive';
+  strictDisqualifiers: boolean;
+}
+

@@ -8,12 +8,13 @@ import { GoogleGenAI } from '@google/genai';
 export interface LLMProvider {
   name: string;
   generateJSON<T>(prompt: string, systemInstruction?: string, options?: { temperature?: number }): Promise<T>;
+  generateText(prompt: string, systemInstruction?: string): Promise<string>;
   generateTextWithGrounding(prompt: string, systemInstruction?: string): Promise<{ text: string; sources: Array<{ title: string; uri: string }> }>;
 }
 
 let geminiClient: GoogleGenAI | null = null;
 
-function getGeminiClient(): GoogleGenAI | null {
+export function getGeminiClient(): GoogleGenAI | null {
   if (!geminiClient) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -61,6 +62,24 @@ export class GeminiProvider implements LLMProvider {
       const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
       return JSON.parse(cleaned) as T;
     }
+  }
+
+  async generateText(prompt: string, systemInstruction?: string): Promise<string> {
+    const client = getGeminiClient();
+    if (!client) {
+      throw new Error('GEMINI_API_KEY is not configured on the server.');
+    }
+
+    const response = await client.models.generateContent({
+      model: this.modelName,
+      contents: prompt,
+      config: {
+        systemInstruction: systemInstruction || 'You are an elite enterprise consulting strategist and advisor.',
+        temperature: 0.3,
+      },
+    });
+
+    return response.text || '';
   }
 
   async generateTextWithGrounding(prompt: string, systemInstruction?: string): Promise<{ text: string; sources: Array<{ title: string; uri: string }> }> {

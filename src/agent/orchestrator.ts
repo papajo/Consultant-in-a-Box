@@ -4,6 +4,8 @@ import {
   ConsultantProfile,
   DecisionType,
   FitAssessment,
+  GeneratedProposal,
+  OpportunityChatMessage,
   OpportunityEvaluationReport,
   OpportunityScoreBreakdown,
   RecommendationResult,
@@ -852,4 +854,156 @@ Return JSON adhering to:
       questionsToAskClient: risk.clarificationQuestionsForClient,
     };
   }
+
+  /**
+   * Generates a tailored Statement of Qualifications, Executive Pitch,
+   * Requirement Capability Proofs, Risk Mitigation, and Clarification Email.
+   */
+  async generateProposal(
+    report: OpportunityEvaluationReport,
+    customFocus?: string
+  ): Promise<GeneratedProposal> {
+    const prompt = `
+You are the world's best enterprise technical proposal writer and consulting strategist.
+Generate a tailored, high-converting consulting proposal package for the consultant based on the evaluated opportunity.
+
+CONSULTANT PROFILE:
+Name: ${report.consultantProfileSnapshot.name}
+Title: ${report.consultantProfileSnapshot.title}
+Experience: ${report.consultantProfileSnapshot.yearsExperience} years
+Primary Skills: ${report.consultantProfileSnapshot.primarySkills.join(', ')}
+Certifications: ${report.consultantProfileSnapshot.certifications.join(', ')}
+Past Projects: ${JSON.stringify(report.consultantProfileSnapshot.pastProjects)}
+Preferred Hourly Rate: $${report.consultantProfileSnapshot.preferences.minHourlyRateUsd}/hr
+
+EVALUATED OPPORTUNITY:
+Client: ${report.clientName}
+Title: ${report.opportunityTitle}
+Decision: ${report.recommendation.decision} (Score: ${report.recommendation.opportunityScore}/100)
+Extracted Requirements: ${JSON.stringify(report.extraction.requirements.slice(0, 10))}
+Strong Matches & Evidence: ${JSON.stringify(report.fitAssessment.strongMatches)}
+Identified Gaps: ${JSON.stringify(report.fitAssessment.gaps)}
+Identified Risks: ${JSON.stringify(report.riskAssessment.identifiedRisks)}
+Clarification Questions: ${JSON.stringify(report.riskAssessment.clarificationQuestionsForClient)}
+${customFocus ? `Special Focus / Strategic Angle requested by consultant: "${customFocus}"` : ''}
+
+Generate a comprehensive proposal object in JSON matching this exact structure:
+{
+  "executivePitch": "A punchy, compelling 2-3 paragraph executive opening addressing the client's core problem, why ${report.consultantProfileSnapshot.name} is uniquely qualified, and the business value delivered.",
+  "statementOfQualifications": "A professional summary of qualifications, domain depth, architectural methodology, and verified past project credentials.",
+  "requirementResponses": [
+    {
+      "requirement": "Requirement text",
+      "capabilityEvidence": "Exact description of how the consultant meets or exceeds this requirement",
+      "pastProjectCitation": "Specific past project name and measured metric/outcome"
+    }
+  ],
+  "riskMitigationPlan": "How the consultant proposes to proactively mitigate the project's technical, architectural, or timeline risks without passing exposure to the client.",
+  "proposedCommercialTerms": "Professional commercial proposal outlining engagement structure (Time & Materials vs Milestones), rate/estimate, kickoff timeline, and scope boundaries.",
+  "clientClarificationEmail": "A ready-to-send, polished email from ${report.consultantProfileSnapshot.name} to the client hiring lead introducing interest and asking the top 3-4 clarification questions respectfully."
 }
+`;
+
+    try {
+      const proposal = await this.provider.generateJSON<GeneratedProposal>(prompt);
+      if (proposal && proposal.executivePitch && proposal.statementOfQualifications) {
+        return proposal;
+      }
+      throw new Error('Incomplete proposal JSON returned');
+    } catch (err: any) {
+      console.warn('[Orchestrator] LLM proposal generation failed, using structured template fallback:', err);
+      return this.fallbackGenerateProposal(report, customFocus);
+    }
+  }
+
+  /**
+   * Fallback proposal generator
+   */
+  private fallbackGenerateProposal(
+    report: OpportunityEvaluationReport,
+    customFocus?: string
+  ): GeneratedProposal {
+    const prof = report.consultantProfileSnapshot;
+    const topProject = prof.pastProjects[0] || { name: 'Enterprise Cloud System', outcomes: '100% SLA uptime' };
+    const matches = report.fitAssessment.strongMatches.slice(0, 4);
+
+    return {
+      executivePitch: `To the Leadership Team at ${report.clientName},\n\nI am pleased to submit this capability proposal for the ${report.opportunityTitle} engagement. With over ${prof.yearsExperience} years of production experience in ${prof.primarySkills.slice(0, 4).join(', ')}, I specialize in architecting resilient, enterprise-grade systems with zero disruption.\n\nHaving recently delivered ${topProject.name} (${topProject.outcomes}), I bring direct, battle-tested domain expertise to accelerate your delivery timeline while strictly guarding data integrity and performance standards.`,
+      statementOfQualifications: `${prof.name} (${prof.title}) offers extensive expertise spanning ${prof.primarySkills.join(', ')}. Holds active credentials including ${prof.certifications.join(', ')}. Demonstrated track record delivering complex solutions across ${prof.industries.join(', ')} sectors with measurable efficiency gains and robust compliance adherence.`,
+      requirementResponses: matches.map(m => ({
+        requirement: m.requirementText,
+        capabilityEvidence: m.profileEvidence || `Demonstrated proficiency in ${m.requirementText}`,
+        pastProjectCitation: topProject.name,
+      })),
+      riskMitigationPlan: `To address potential scope and integration complexities:\n1. Phased architectural spike in Sprint 1 to de-risk interfaces.\n2. Automated CI/CD test gates enforcing security and compliance thresholds.\n3. Weekly cadence reviews with key stakeholders for full transparency.`,
+      proposedCommercialTerms: `Structure: Time & Materials (or capped Sprint Milestones)\nStandard Billing Rate: $${prof.preferences.minHourlyRateUsd}/hr\nEstimated Kickoff: Immediate (within 5 business days of contract execution)\nPayment Terms: Net-30 upon bi-weekly milestone approvals.`,
+      clientClarificationEmail: `Subject: Inquiry & Discovery Questions regarding ${report.opportunityTitle} - ${prof.name}\n\nHi ${report.clientName} Team,\n\nI reviewed the requirements for the ${report.opportunityTitle} initiative with great enthusiasm. My background in ${prof.primarySkills.slice(0, 3).join(', ')} aligns closely with your technical objectives.\n\nTo ensure our proposal and scoping are precisely aligned with your expectations, I would appreciate your brief insight on a few key points:\n\n${report.riskAssessment.clarificationQuestionsForClient.slice(0, 3).map((q, idx) => `${idx + 1}. ${q}`).join('\n')}\n\nWould you be open to a brief 15-minute introductory call this week?\n\nBest regards,\n${prof.name}\n${prof.title}`,
+    };
+  }
+
+  /**
+   * Interactive AI Copilot grounded in the evaluated RFP & Consultant Profile.
+   */
+  async chatWithOpportunityCopilot(
+    report: OpportunityEvaluationReport,
+    conversationHistory: OpportunityChatMessage[],
+    newMessage: string
+  ): Promise<OpportunityChatMessage> {
+    const contextPrompt = `
+You are the Consultant-in-a-Box AI Strategic Advisor for ${report.consultantProfileSnapshot.name}.
+You are advising the consultant on the following evaluated engagement opportunity:
+
+OPPORTUNITY SUMMARY:
+- Client: ${report.clientName}
+- Title: ${report.opportunityTitle}
+- Decision: ${report.recommendation.decision} (Opportunity Score: ${report.recommendation.opportunityScore}/100)
+- Executive Rationale: ${report.recommendation.executiveSummary}
+- Key Strengths: ${report.recommendation.keyStrengths.join('; ')}
+- Gaps: ${report.recommendation.criticalGaps.join('; ')}
+- Dealbreakers: ${report.recommendation.dealBreakers.join('; ')}
+- Top Risks: ${report.riskAssessment.identifiedRisks.map(r => `${r.title} (${r.severity})`).join('; ')}
+- Research Insights: ${report.research.clientOverview} | Tech Stack: ${report.research.techStackInsights.join(', ')}
+
+CONSULTANT:
+- Name: ${report.consultantProfileSnapshot.name} (${report.consultantProfileSnapshot.title})
+- Skills: ${report.consultantProfileSnapshot.primarySkills.join(', ')}
+- Min Rate: $${report.consultantProfileSnapshot.preferences.minHourlyRateUsd}/hr
+- Clearance: ${report.consultantProfileSnapshot.preferences.securityClearance}
+- Remote Only: ${report.consultantProfileSnapshot.preferences.remoteOnly}
+
+CONVERSATION HISTORY:
+${conversationHistory.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n')}
+
+USER QUESTION: "${newMessage}"
+
+Provide a direct, high-value, highly strategic answer for the consultant.
+Be pragmatic, sharp, actionable, and grounded in the data above.
+Include 2-3 short bullet suggestions for next tactical actions if relevant.
+`;
+
+    try {
+      const responseText = await this.provider.generateText(contextPrompt);
+      const messageId = `msg-${Date.now()}`;
+      return {
+        id: messageId,
+        role: 'assistant',
+        content: responseText || 'I evaluated your question against the opportunity report. Proceeding with clear scope boundaries is recommended.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        suggestedActions: [
+          'Draft clarification email',
+          'Generate customized proposal',
+          'Review risk mitigations',
+        ],
+      };
+    } catch (err: any) {
+      console.warn('[Orchestrator] AI Copilot chat failed, fallback response:', err);
+      return {
+        id: `msg-${Date.now()}`,
+        role: 'assistant',
+        content: `Based on the ${report.recommendation.decision} evaluation (${report.recommendation.opportunityScore}/100), the priority is clarifying the scope uncertainties with ${report.clientName} and framing your past project experience (${report.consultantProfileSnapshot.pastProjects[0]?.name || 'past engagements'}) to defend your $${report.consultantProfileSnapshot.preferences.minHourlyRateUsd}/hr rate floor.`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+    }
+  }
+}
+
