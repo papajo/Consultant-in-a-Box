@@ -1,9 +1,9 @@
 # CLAUDE.md — Consultant-in-a-Box
 
 ## Stack
-- TypeScript, React 19 + Vite, Express (`server.ts`, Vite middleware in dev)
+- TypeScript, React 19 + Vite. API routes in `src/server/app.ts` (`createApp()`); `server.ts` = local dev/node host; `api/index.ts` = Vercel function (see `vercel.json`)
 - LLM: `src/agent/modelProvider.ts` — `FallbackProvider` = Gemini (`@google/genai`) → Groq (`src/agent/groqClient.ts`)
-- Docs parsing: pdf.js / pdf-parse / mammoth; image OCR Gemini → Groq vision (`src/agent/documentParser.ts`)
+- Docs parsing: pdfjs-dist (server: legacy build + static worker import, required for Vercel) / mammoth; image OCR Gemini → Groq vision (`src/agent/documentParser.ts`)
 - Orchestrator: `src/agent/orchestrator.ts` (deterministic fallbacks when the LLM fails)
 
 ## Commands
@@ -20,3 +20,6 @@ npm run build && npm start
 - Env: GEMINI_API_KEY (primary), GROQ_API_KEY / GROQ_MODEL / GROQ_VISION_MODEL (fallback).
 - New LLM calls go through `LLMProvider`, never a raw SDK client, so the fallback applies.
 - Groq has no search grounding: research results return `sources: []`.
+- Relative imports use `.ts` extensions; `rewriteRelativeImportExtensions` in tsconfig makes Vercel's compile emit `.js`. Don't remove it.
+- Verify deploy builds locally: `vercel build` then run `.vercel/output/functions/api/index.func/api/index.js`.
+- Rate limits: `src/server/rateLimit.ts` (in-memory, per instance).

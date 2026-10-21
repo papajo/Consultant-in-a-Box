@@ -1,10 +1,29 @@
-import * as pdfParseModule from 'pdf-parse';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+// Static import registers globalThis.pdfjsWorker, so pdf.js runs in-process without
+// dynamically loading a worker file (which serverless bundlers would not trace).
+import 'pdfjs-dist/legacy/build/pdf.worker.mjs';
 import mammoth from 'mammoth';
 import { getGeminiClient } from './modelProvider.ts';
 import { groqChat, groqConfigured, groqVisionModel } from './groqClient.ts';
 
-// Handle CommonJS / ESM interop for pdf-parse
-const pdfParse: any = (pdfParseModule as any).default || pdfParseModule;
+async function extractPdf(buffer: Buffer): Promise<{ text: string; pages: number }> {
+  const doc = await pdfjs.getDocument({
+    data: new Uint8Array(buffer),
+    useSystemFonts: true,
+    disableFontFace: true,
+  }).promise;
+  try {
+    const parts: string[] = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      parts.push(content.items.map((it: any) => ('str' in it ? it.str + (it.hasEOL ? '\n' : ' ') : '')).join('').trim());
+    }
+    return { text: parts.join('\n\n'), pages: doc.numPages };
+  } finally {
+    await doc.loadingTask?.destroy?.();
+  }
+}
 
 export interface ParsedDocumentResult {
   text: string;
@@ -29,11 +48,11 @@ export async function parseUploadedDocument(
   // 1. PDF Documents
   if (extension === 'pdf' || mimeType.includes('pdf')) {
     try {
-      const pdfData = await pdfParse(fileBuffer);
-      extractedText = pdfData.text || '';
-      pageCount = pdfData.numpages;
+      const pdfData = await extractPdf(fileBuffer);
+      extractedText = pdfData.text;
+      pageCount = pdfData.pages;
     } catch (pdfErr: any) {
-      console.warn('[DocumentParser] pdf-parse failed, fallback to raw string extraction:', pdfErr);
+      console.warn('[DocumentParser] PDF text extraction failed, fallback to raw string extraction:', pdfErr);
       extractedText = fileBuffer.toString('utf-8');
     }
   }

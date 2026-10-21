@@ -20,6 +20,9 @@ npm run test:fallback   # Gemini → Groq fallback tests (no network)
 ```
 Production build: `npm run build && npm start`.
 
+### Deploy (Vercel)
+`vercel.json` serves the Vite build as static files, and all `/api/*` routes go to one Node function (`api/index.ts` → `src/server/app.ts`). Set `GROQ_API_KEY` and/or `GEMINI_API_KEY` in the project's environment variables. AI routes are rate-limited per visitor (`RATE_LIMIT_PER_HOUR`, default 10; chat `CHAT_LIMIT_PER_HOUR`, default 30). The limit is best-effort and per instance.
+
 ### Model fallback
 Gemini is the primary model. If the key is missing, rate-limited (429) or the service is down, the same call is retried on **Groq** (`GROQ_API_KEY`, default `openai/gpt-oss-120b`). Image OCR falls back to a Groq vision model. Groq has no web-search grounding, so client research then comes from model knowledge, with no sources.
 
