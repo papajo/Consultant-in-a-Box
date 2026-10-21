@@ -1,12 +1,48 @@
-import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-// Static import registers globalThis.pdfjsWorker, so pdf.js runs in-process without
-// dynamically loading a worker file (which serverless bundlers would not trace).
-import 'pdfjs-dist/legacy/build/pdf.worker.mjs';
 import mammoth from 'mammoth';
 import { getGeminiClient } from './modelProvider.ts';
 import { groqChat, groqConfigured, groqVisionModel } from './groqClient.ts';
 
+/**
+ * pdf.js's Node build evaluates `new DOMMatrix()` at module load and normally
+ * polyfills it via the native @napi-rs/canvas package, loaded with a dynamic
+ * require that serverless bundlers (Vercel) don't trace. Text extraction never
+ * renders, so a minimal identity-matrix stand-in is enough.
+ */
+function ensureDomMatrix() {
+  const g = globalThis as any;
+  if (typeof g.DOMMatrix !== 'undefined') return;
+  g.DOMMatrix = class DOMMatrix {
+    a = 1; b = 0; c = 0; d = 1; e = 0; f = 0;
+    constructor(init?: number[]) {
+      if (Array.isArray(init) && init.length === 6) [this.a, this.b, this.c, this.d, this.e, this.f] = init;
+    }
+    multiplySelf() { return this; }
+    preMultiplySelf() { return this; }
+    translateSelf() { return this; }
+    scaleSelf() { return this; }
+    invertSelf() { return this; }
+  };
+}
+
+let pdfjsPromise: Promise<any> | undefined;
+function loadPdfjs() {
+  // Lazy: a PDF-library problem must never take down the rest of the API.
+  pdfjsPromise ??= (async () => {
+    ensureDomMatrix();
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    // Registers globalThis.pdfjsWorker so pdf.js runs in-process without
+    // dynamically loading a worker file.
+    await import('pdfjs-dist/legacy/build/pdf.worker.mjs');
+    return pdfjs;
+  })().catch((err) => {
+    pdfjsPromise = undefined;
+    throw err;
+  });
+  return pdfjsPromise;
+}
+
 async function extractPdf(buffer: Buffer): Promise<{ text: string; pages: number }> {
+  const pdfjs = await loadPdfjs();
   const doc = await pdfjs.getDocument({
     data: new Uint8Array(buffer),
     useSystemFonts: true,
