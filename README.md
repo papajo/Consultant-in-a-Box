@@ -21,7 +21,7 @@ npm run test:fallback   # Gemini → Groq fallback tests (no network)
 Production build: `npm run build && npm start`.
 
 ### Model fallback
-Gemini is the primary model. If the key is missing, rate-limited (429) or the service is down, the same call is retried on **Groq** (`GROQ_API_KEY`, default `llama-3.3-70b-versatile`). Image OCR falls back to a Groq vision model. Groq has no web-search grounding, so client research then comes from model knowledge, with no sources.
+Gemini is the primary model. If the key is missing, rate-limited (429) or the service is down, the same call is retried on **Groq** (`GROQ_API_KEY`, default `openai/gpt-oss-120b`). Image OCR falls back to a Groq vision model. Groq has no web-search grounding, so client research then comes from model knowledge, with no sources.
 
 ### Status
 A working prototype, actively developed. Started from Google AI Studio tooling, then extended.

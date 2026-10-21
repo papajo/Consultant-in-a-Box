@@ -4,8 +4,8 @@
  *
  * Env:
  *   GROQ_API_KEY        required to enable the fallback
- *   GROQ_MODEL          text model (default: llama-3.3-70b-versatile)
- *   GROQ_VISION_MODEL   image-capable model (default: meta-llama/llama-4-scout-17b-16e-instruct)
+ *   GROQ_MODEL          text model (default: openai/gpt-oss-120b)
+ *   GROQ_VISION_MODEL   image-capable model (default: qwen/qwen3.8-27b)
  */
 
 const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
@@ -32,11 +32,11 @@ export function groqConfigured(): boolean {
 }
 
 export function groqTextModel(): string {
-  return process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+  return process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 }
 
 export function groqVisionModel(): string {
-  return process.env.GROQ_VISION_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct';
+  return process.env.GROQ_VISION_MODEL || 'qwen/qwen3.8-27b';
 }
 
 export async function groqChat(messages: GroqMessage[], opts: GroqOptions = {}): Promise<string> {
