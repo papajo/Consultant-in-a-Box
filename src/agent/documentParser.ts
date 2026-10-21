@@ -1,6 +1,7 @@
 import * as pdfParseModule from 'pdf-parse';
 import mammoth from 'mammoth';
 import { getGeminiClient } from './modelProvider.ts';
+import { groqChat, groqConfigured, groqVisionModel } from './groqClient.ts';
 
 // Handle CommonJS / ESM interop for pdf-parse
 const pdfParse: any = (pdfParseModule as any).default || pdfParseModule;
@@ -51,32 +52,49 @@ export async function parseUploadedDocument(
     ['png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff'].includes(extension) ||
     mimeType.startsWith('image/')
   ) {
-    try {
-      const ai = getGeminiClient();
-      if (ai) {
-        const base64Data = fileBuffer.toString('base64');
-        const imgMime = mimeType.startsWith('image/') ? mimeType : `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+    const base64Data = fileBuffer.toString('base64');
+    const imgMime = mimeType.startsWith('image/') ? mimeType : `image/${extension === 'jpg' ? 'jpeg' : extension}`;
+    const ocrPrompt =
+      'Extract and transcribe all text, RFP requirements, statements of work, budgets, timeline, criteria, and details from this document image accurately and completely. Maintain structure and headers.';
+    const errors: string[] = [];
+
+    const ai = getGeminiClient();
+    if (ai) {
+      try {
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
-          contents: [
+          contents: [{ role: 'user', parts: [{ inlineData: { mimeType: imgMime, data: base64Data } }, { text: ocrPrompt }] }],
+        });
+        extractedText = response.text || '';
+      } catch (imgErr: any) {
+        errors.push(`Gemini: ${imgErr.message}`);
+      }
+    } else {
+      errors.push('Gemini: GEMINI_API_KEY not configured');
+    }
+
+    if (!extractedText && groqConfigured()) {
+      try {
+        extractedText = await groqChat(
+          [
             {
               role: 'user',
-              parts: [
-                { inlineData: { mimeType: imgMime, data: base64Data } },
-                {
-                  text: 'Extract and transcribe all text, RFP requirements, statements of work, budgets, timeline, criteria, and details from this document image accurately and completely. Maintain structure and headers.',
-                },
+              content: [
+                { type: 'text', text: ocrPrompt },
+                { type: 'image_url', image_url: { url: `data:${imgMime};base64,${base64Data}` } },
               ],
             },
           ],
-        });
-        extractedText = response.text || '';
-      } else {
-        throw new Error('Gemini API key is not configured for image OCR.');
+          { model: groqVisionModel(), temperature: 0 },
+        );
+      } catch (groqErr: any) {
+        errors.push(`Groq: ${groqErr.message}`);
       }
-    } catch (imgErr: any) {
-      console.warn('[DocumentParser] Image OCR failed:', imgErr);
-      throw new Error(`Failed to extract text from document image: ${imgErr.message}`);
+    }
+
+    if (!extractedText) {
+      console.warn('[DocumentParser] Image OCR failed:', errors.join('; '));
+      throw new Error(`Failed to extract text from document image: ${errors.join('; ') || 'no AI provider configured'}`);
     }
   }
   // 4. Plain Text, Markdown, JSON, CSV, RTF, HTML, XML

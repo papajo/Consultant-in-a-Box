@@ -24,6 +24,7 @@ async function startServer() {
       status: 'ok',
       service: 'Consultant-in-a-Box Opportunity Evaluator',
       geminiKeyConfigured: !!process.env.GEMINI_API_KEY,
+      groqKeyConfigured: !!process.env.GROQ_API_KEY,
       timestamp: new Date().toISOString(),
     });
   });

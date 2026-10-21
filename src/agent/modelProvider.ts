@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { groqChat, groqConfigured, parseJSONLoose } from './groqClient.ts';
 
 /**
  * Model Provider Abstraction Interface
@@ -132,4 +133,85 @@ export class GeminiProvider implements LLMProvider {
   }
 }
 
-export const defaultModelProvider = new GeminiProvider();
+/**
+ * Groq provider (OpenAI-compatible). No web-search grounding: research falls
+ * back to model knowledge and returns no sources.
+ */
+export class GroqProvider implements LLMProvider {
+  name = 'Groq';
+
+  async generateJSON<T>(prompt: string, systemInstruction?: string, options?: { temperature?: number }): Promise<T> {
+    const text = await groqChat(
+      [
+        { role: 'system', content: systemInstruction || 'You are an expert AI consulting evaluator agent. Always return valid JSON adhering strictly to instructions.' },
+        { role: 'user', content: prompt },
+      ],
+      { json: true, temperature: options?.temperature ?? 0.2 },
+    );
+    return parseJSONLoose<T>(text || '{}');
+  }
+
+  async generateText(prompt: string, systemInstruction?: string): Promise<string> {
+    return groqChat(
+      [
+        { role: 'system', content: systemInstruction || 'You are an elite enterprise consulting strategist and advisor.' },
+        { role: 'user', content: prompt },
+      ],
+      { temperature: 0.3 },
+    );
+  }
+
+  async generateTextWithGrounding(prompt: string, systemInstruction?: string) {
+    const text = await this.generateText(
+      prompt,
+      systemInstruction || 'You are a research agent investigating corporate clients and consulting opportunities. You have no live web access; say so where facts may be out of date.',
+    );
+    return { text: text || 'Client research generated using model knowledge base.', sources: [] };
+  }
+}
+
+/**
+ * Tries Gemini first; on missing key, rate limit (429), overload (503) or any
+ * other error, retries the same call on Groq when GROQ_API_KEY is set.
+ */
+export class FallbackProvider implements LLMProvider {
+  constructor(
+    private primary: LLMProvider = new GeminiProvider(),
+    private secondary: LLMProvider = new GroqProvider(),
+    private secondaryEnabled: () => boolean = groqConfigured,
+  ) {}
+
+  lastUsed = '';
+
+  get name() {
+    return this.lastUsed || this.primary.name;
+  }
+
+  private async run<R>(label: string, call: (p: LLMProvider) => Promise<R>): Promise<R> {
+    try {
+      const r = await call(this.primary);
+      this.lastUsed = this.primary.name;
+      return r;
+    } catch (err: any) {
+      if (!this.secondaryEnabled()) throw err;
+      console.warn(`[ModelProvider] ${this.primary.name} failed on ${label} (${err?.status || err?.message}); falling back to ${this.secondary.name}`);
+      const r = await call(this.secondary);
+      this.lastUsed = this.secondary.name;
+      return r;
+    }
+  }
+
+  generateJSON<T>(prompt: string, systemInstruction?: string, options?: { temperature?: number }) {
+    return this.run('generateJSON', p => p.generateJSON<T>(prompt, systemInstruction, options));
+  }
+
+  generateText(prompt: string, systemInstruction?: string) {
+    return this.run('generateText', p => p.generateText(prompt, systemInstruction));
+  }
+
+  generateTextWithGrounding(prompt: string, systemInstruction?: string) {
+    return this.run('generateTextWithGrounding', p => p.generateTextWithGrounding(prompt, systemInstruction));
+  }
+}
+
+export const defaultModelProvider = new FallbackProvider();

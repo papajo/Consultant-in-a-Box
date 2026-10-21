@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx tests/benchmarkTests.ts"
+    "test": "tsx tests/benchmarkTests.ts",
+    "test:fallback": "tsx tests/groqFallbackTests.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
